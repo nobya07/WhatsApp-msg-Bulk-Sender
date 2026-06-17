@@ -1,0 +1,518 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>WhatsApp Bulk Message Sender</title>
+  <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #f0f2f5;
+      color: #333;
+      min-height: 100vh;
+    }
+    .container { max-width: 800px; margin: 0 auto; padding: 20px; }
+    h1 {
+      text-align: center;
+      color: #075e54;
+      margin-bottom: 10px;
+      font-size: 1.8rem;
+    }
+    .subtitle { text-align: center; color: #667; margin-bottom: 30px; font-size: 0.95rem; }
+
+    .card {
+      background: #fff;
+      border-radius: 12px;
+      padding: 24px;
+      margin-bottom: 20px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+    }
+    .card h2 {
+      font-size: 1.2rem;
+      color: #075e54;
+      margin-bottom: 16px;
+      padding-bottom: 8px;
+      border-bottom: 2px solid #25d366;
+    }
+    .card h2 .step { background: #25d366; color: #fff; border-radius: 50%; width: 28px; height: 28px; display: inline-flex; align-items: center; justify-content: center; font-size: 0.85rem; margin-right: 8px; }
+
+    label { display: block; font-weight: 600; margin-bottom: 6px; color: #444; font-size: 0.9rem; }
+    input, textarea, select {
+      width: 100%;
+      padding: 10px 12px;
+      border: 2px solid #e0e0e0;
+      border-radius: 8px;
+      font-size: 0.95rem;
+      transition: border-color 0.2s;
+      margin-bottom: 14px;
+    }
+    input:focus, textarea:focus { outline: none; border-color: #25d366; }
+    textarea { resize: vertical; min-height: 80px; font-family: inherit; }
+
+    .file-upload {
+      border: 2px dashed #ccc;
+      border-radius: 8px;
+      padding: 20px;
+      text-align: center;
+      cursor: pointer;
+      transition: border-color 0.2s, background 0.2s;
+      margin-bottom: 14px;
+    }
+    .file-upload:hover { border-color: #25d366; background: #f0fdf4; }
+    .file-upload.has-file { border-color: #25d366; background: #f0fdf4; }
+    .file-upload input { display: none; }
+    .file-upload .icon { font-size: 2rem; margin-bottom: 8px; }
+    .file-upload .text { color: #667; font-size: 0.9rem; }
+    .file-upload .filename { color: #075e54; font-weight: 600; font-size: 0.9rem; margin-top: 6px; }
+
+    .row { display: flex; gap: 12px; }
+    .row > * { flex: 1; }
+
+    .btn {
+      width: 100%;
+      padding: 14px;
+      border: none;
+      border-radius: 8px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity 0.2s, transform 0.1s;
+      color: #fff;
+    }
+    .btn:active { transform: scale(0.98); }
+    .btn:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
+    .btn-primary { background: #25d366; }
+    .btn-primary:hover:not(:disabled) { opacity: 0.9; }
+    .btn-danger { background: #e53935; }
+    .btn-danger:hover:not(:disabled) { opacity: 0.9; }
+    .btn-secondary { background: #78909c; }
+    .btn-secondary:hover:not(:disabled) { opacity: 0.9; }
+
+    .qr-container {
+      text-align: center;
+      padding: 20px;
+      background: #fff;
+      border-radius: 8px;
+      margin-bottom: 14px;
+    }
+    .qr-container img { max-width: 256px; border: 4px solid #fff; border-radius: 8px; box-shadow: 0 2px 12px rgba(0,0,0,0.1); }
+    .qr-placeholder { padding: 40px; color: #999; font-size: 0.95rem; }
+
+    .status-log {
+      background: #1a1a2e;
+      color: #e0e0e0;
+      padding: 16px;
+      border-radius: 8px;
+      max-height: 250px;
+      overflow-y: auto;
+      font-family: 'Courier New', monospace;
+      font-size: 0.82rem;
+      line-height: 1.5;
+      margin-bottom: 14px;
+    }
+    .status-log .sent { color: #4caf50; }
+    .status-log .failed { color: #e53935; }
+    .status-log .info { color: #42a5f5; }
+    .status-log .error { color: #ff7043; }
+
+    .stats {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 12px;
+      margin-bottom: 14px;
+    }
+    .stat-box {
+      background: #f8f9fa;
+      border-radius: 8px;
+      padding: 14px;
+      text-align: center;
+    }
+    .stat-box .number { font-size: 1.6rem; font-weight: 700; color: #075e54; }
+    .stat-box .label { font-size: 0.8rem; color: #888; margin-top: 4px; }
+
+    .hidden { display: none; }
+    .mt-10 { margin-top: 10px; }
+
+    .badge {
+      display: inline-block;
+      padding: 4px 12px;
+      border-radius: 12px;
+      font-size: 0.8rem;
+      font-weight: 600;
+    }
+    .badge-green { background: #e8f5e9; color: #2e7d32; }
+    .badge-red { background: #ffebee; color: #c62828; }
+    .badge-blue { background: #e3f2fd; color: #1565c0; }
+    .badge-gray { background: #f5f5f5; color: #616161; }
+
+    .connection-status {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+    .dot {
+      width: 10px; height: 10px; border-radius: 50%; display: inline-block;
+    }
+    .dot-green { background: #4caf50; box-shadow: 0 0 6px #4caf50; }
+    .dot-red { background: #e53935; box-shadow: 0 0 6px #e53935; }
+    .dot-yellow { background: #ffa726; box-shadow: 0 0 6px #ffa726; }
+
+    .report-link {
+      text-align: center;
+      margin-top: 10px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>📱 WhatsApp Bulk Sender</h1>
+    <p class="subtitle">Send personalized messages to your contacts</p>
+
+    <!-- Step 1: Connect WhatsApp -->
+    <div class="card">
+      <h2><span class="step">1</span>Connect WhatsApp</h2>
+      <div class="connection-status" id="connectionStatus">
+        <span class="dot dot-red" id="statusDot"></span>
+        <span id="statusText">Not connected</span>
+      </div>
+      <div id="qrCodeArea">
+        <div class="qr-container">
+          <div class="qr-placeholder" id="qrPlaceholder">Click "Connect" to generate QR code</div>
+          <div id="qrImageContainer" class="hidden"></div>
+        </div>
+        <button class="btn btn-primary" id="connectBtn" onclick="connectWhatsApp()">📲 Connect WhatsApp</button>
+      </div>
+      <div id="connectedArea" class="hidden">
+        <p style="text-align:center;color:#075e54;font-weight:600;">✅ Connected as <span id="connectedName">—</span></p>
+      </div>
+    </div>
+
+    <!-- Step 2: Upload Contacts -->
+    <div class="card">
+      <h2><span class="step">2</span>Upload Contacts (Excel)</h2>
+      <div class="file-upload" id="excelUpload" onclick="document.getElementById('excelInput').click()">
+        <div class="icon">📊</div>
+        <div class="text">Click to upload Excel file (.xlsx)</div>
+        <div class="filename" id="excelFilename"></div>
+        <input type="file" id="excelInput" accept=".xlsx" onchange="onExcelUpload(event)">
+      </div>
+      <div id="contactsPreview" class="hidden">
+        <p style="font-size:0.9rem;color:#667;">Loaded <strong id="contactCount">0</strong> contacts. Preview (first 20):</p>
+        <div style="max-height:150px;overflow-y:auto;background:#f8f9fa;border-radius:6px;padding:8px;font-size:0.82rem;margin-top:6px;">
+          <pre id="contactsList" style="white-space:pre-wrap;"></pre>
+        </div>
+      </div>
+      <button class="btn btn-secondary mt-10" onclick="downloadSample()">📥 Download Sample Excel</button>
+    </div>
+
+    <!-- Step 3: Compose Message -->
+    <div class="card">
+      <h2><span class="step">3</span>Compose Message</h2>
+      <label for="messageInput">Message (use <code>{{name}}</code> for personalization)</label>
+      <textarea id="messageInput" placeholder="Hi {{name}}, here is our special offer!">Hi {{name}}, here is our special offer! Visit our website for more details.</textarea>
+
+      <label for="attachmentUpload">Attachment (optional — image or PDF)</label>
+      <div class="file-upload" id="attachmentUpload" onclick="document.getElementById('attachmentInput').click()">
+        <div class="icon">📎</div>
+        <div class="text">Click to upload image or PDF</div>
+        <div class="filename" id="attachmentFilename"></div>
+        <input type="file" id="attachmentInput" accept="image/*,.pdf" onchange="onAttachmentUpload(event)">
+      </div>
+
+      <div class="row">
+        <div>
+          <label for="dailyLimit">Daily Limit</label>
+          <input type="number" id="dailyLimit" value="100" min="1">
+        </div>
+        <div>
+          <label for="delayMin">Delay Min (seconds)</label>
+          <input type="number" id="delayMin" value="3" min="1">
+        </div>
+        <div>
+          <label for="delayMax">Delay Max (seconds)</label>
+          <input type="number" id="delayMax" value="7" min="1">
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 4: Send -->
+    <div class="card">
+      <h2><span class="step">4</span>Send Messages</h2>
+      <div class="stats">
+        <div class="stat-box">
+          <div class="number" id="statSent">0</div>
+          <div class="label">✅ Sent</div>
+        </div>
+        <div class="stat-box">
+          <div class="number" id="statFailed">0</div>
+          <div class="label">❌ Failed</div>
+        </div>
+        <div class="stat-box">
+          <div class="number" id="statTotal">0</div>
+          <div class="label">📨 Total</div>
+        </div>
+      </div>
+      <div class="status-log" id="statusLog">
+        <div class="info">Waiting to start...</div>
+      </div>
+      <button class="btn btn-primary" id="sendBtn" onclick="startSending()" disabled>🚀 Start Sending</button>
+      <button class="btn btn-danger hidden" id="cancelBtn" onclick="cancelSending()">⏹ Cancel</button>
+      <div id="reportArea" class="hidden report-link">
+        <a href="#" id="reportLink" class="btn btn-secondary" target="_blank">📥 Download Report</a>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const socket = io();
+    let excelFilePath = '';
+    let attachmentFilePath = '';
+    let connected = false;
+    let clientReady = false;
+    let sending = false;
+    let reportPath = '';
+
+    // ─── Socket Events ───
+    socket.on('connect', () => {
+      log('info', 'Connected to server.');
+    });
+
+    socket.on('status', (data) => {
+      switch (data.type) {
+        case 'info':
+          log('info', data.message);
+          break;
+        case 'error':
+          log('error', data.message);
+          break;
+        case 'progress':
+          updateStats(data);
+          break;
+        case 'complete':
+          sending = false;
+          setSendingState(false);
+          updateStats(data);
+          document.getElementById('sendBtn').disabled = false;
+          log('sent', `✅ Done! Sent: ${data.sentCount}, Failed: ${data.failedCount}`);
+          if (data.reportPath) {
+            reportPath = data.reportPath;
+            document.getElementById('reportArea').classList.remove('hidden');
+            document.getElementById('reportLink').href = `/api/download-report?path=${encodeURIComponent(data.reportPath)}`;
+          }
+          break;
+        case 'qr':
+          showQR(data.qr);
+          break;
+      }
+    });
+
+    socket.on('qr', (data) => {
+      showQR(data.qr);
+    });
+
+    socket.on('client-ready', (data) => {
+      clientReady = true;
+      connected = true;
+      document.getElementById('connectedName').textContent = data.pushname;
+      document.getElementById('qrCodeArea').classList.add('hidden');
+      document.getElementById('connectedArea').classList.remove('hidden');
+      setConnectionStatus(true);
+      checkCanSend();
+    });
+
+    socket.on('client-disconnected', () => {
+      clientReady = false;
+      connected = false;
+      setConnectionStatus(false);
+      document.getElementById('qrCodeArea').classList.remove('hidden');
+      document.getElementById('connectedArea').classList.add('hidden');
+    });
+
+    // ─── Functions ───
+    function connectWhatsApp() {
+      document.getElementById('connectBtn').disabled = true;
+      document.getElementById('connectBtn').textContent = 'Connecting...';
+      log('info', 'Initializing WhatsApp client...');
+      socket.emit('start-client');
+    }
+
+    function onExcelUpload(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+      document.getElementById('excelFilename').textContent = file.name;
+      document.getElementById('excelUpload').classList.add('has-file');
+
+      const formData = new FormData();
+      formData.append('excel', file);
+
+      fetch('/api/preview-contacts', {
+        method: 'POST',
+        body: formData,
+      })
+        .then((r) => r.json())
+        .then((data) => {
+          if (data.error) {
+            log('error', data.error);
+            return;
+          }
+          excelFilePath = file.name; // We'll handle via upload
+          document.getElementById('contactCount').textContent = data.total;
+          const preview = data.contacts.map((c) => `${c.number}  |  ${c.name}`).join('\n');
+          document.getElementById('contactsList').textContent = preview;
+          document.getElementById('contactsPreview').classList.remove('hidden');
+          log('info', `Loaded ${data.total} contacts.`);
+          checkCanSend();
+        })
+        .catch((err) => log('error', 'Upload failed: ' + err.message));
+    }
+
+    function onAttachmentUpload(event) {
+      const file = event.target.files[0];
+      if (!file) return;
+      document.getElementById('attachmentFilename').textContent = file.name;
+      document.getElementById('attachmentUpload').classList.add('has-file');
+
+      const formData = new FormData();
+      formData.append('attachment', file);
+
+      fetch('/api/upload-attachment', {
+        method: 'POST',
+        body: formData,
+      })
+        .then((r) => r.json())
+        .then((data) => {
+          if (data.error) {
+            log('error', data.error);
+            return;
+          }
+          attachmentFilePath = data.filePath;
+          log('info', `Attachment uploaded: ${file.name}`);
+        })
+        .catch((err) => log('error', 'Upload failed: ' + err.message));
+    }
+
+    async function startSending() {
+      if (sending) return;
+      if (!clientReady) {
+        log('error', 'Please connect WhatsApp first.');
+        return;
+      }
+
+      // Upload Excel first if not already
+      const excelInput = document.getElementById('excelInput');
+      if (!excelInput.files[0]) {
+        log('error', 'Please upload an Excel file.');
+        return;
+      }
+
+      // Upload the excel to get a path
+      const excelFormData = new FormData();
+      excelFormData.append('excel', excelInput.files[0]);
+
+      try {
+        const excelRes = await fetch('/api/upload-excel', {
+          method: 'POST',
+          body: excelFormData,
+        });
+        const excelData = await excelRes.json();
+        if (excelData.error) {
+          log('error', excelData.error);
+          return;
+        }
+
+        const payload = {
+          excelFilePath: excelData.filePath,
+          messageTemplate: document.getElementById('messageInput').value,
+          dailyLimit: parseInt(document.getElementById('dailyLimit').value, 10) || 100,
+          delayMin: (parseInt(document.getElementById('delayMin').value, 10) || 3) * 1000,
+          delayMax: (parseInt(document.getElementById('delayMax').value, 10) || 7) * 1000,
+        };
+
+        if (attachmentFilePath) {
+          payload.attachmentPath = attachmentFilePath;
+        }
+
+        sending = true;
+        setSendingState(true);
+        document.getElementById('reportArea').classList.add('hidden');
+        log('info', 'Starting to send messages...');
+        socket.emit('start-send', payload);
+      } catch (err) {
+        log('error', 'Error: ' + err.message);
+      }
+    }
+
+    function cancelSending() {
+      socket.emit('cancel-send');
+      log('info', 'Cancelling...');
+    }
+
+    function downloadSample() {
+      window.open('/api/sample-excel', '_blank');
+    }
+
+    function showQR(qrData) {
+      const container = document.getElementById('qrImageContainer');
+      const placeholder = document.getElementById('qrPlaceholder');
+      placeholder.classList.add('hidden');
+      container.classList.remove('hidden');
+      // Use Google Charts API to render QR
+      container.innerHTML = `<img src="https://api.qrserver.com/v1/create-qr-code/?size=256x256&data=${encodeURIComponent(qrData)}" alt="QR Code">`;
+      log('info', '📱 Scan the QR code with your WhatsApp phone.');
+    }
+
+    function setConnectionStatus(ready) {
+      const dot = document.getElementById('statusDot');
+      const text = document.getElementById('statusText');
+      if (ready) {
+        dot.className = 'dot dot-green';
+        text.textContent = 'Connected';
+      } else {
+        dot.className = 'dot dot-red';
+        text.textContent = 'Not connected';
+      }
+    }
+
+    function setSendingState(isSending) {
+      if (isSending) {
+        document.getElementById('sendBtn').classList.add('hidden');
+        document.getElementById('cancelBtn').classList.remove('hidden');
+        document.getElementById('sendBtn').disabled = true;
+      } else {
+        document.getElementById('sendBtn').classList.remove('hidden');
+        document.getElementById('cancelBtn').classList.add('hidden');
+        if (clientReady) document.getElementById('sendBtn').disabled = false;
+      }
+    }
+
+    function checkCanSend() {
+      if (clientReady && excelFilePath) {
+        document.getElementById('sendBtn').disabled = false;
+      }
+    }
+
+    function updateStats(data) {
+      if (data.sentCount !== undefined) document.getElementById('statSent').textContent = data.sentCount;
+      if (data.failedCount !== undefined) document.getElementById('statFailed').textContent = data.failedCount;
+      if (data.total !== undefined) document.getElementById('statTotal').textContent = data.total;
+      if (data.index && data.total) {
+        log('progress', `📨 [${data.index}/${data.total}] ${data.name || data.current}`);
+      }
+    }
+
+    function log(type, message) {
+      const logEl = document.getElementById('statusLog');
+      const div = document.createElement('div');
+      div.className = type;
+      const time = new Date().toLocaleTimeString();
+      div.textContent = `[${time}] ${message}`;
+      logEl.appendChild(div);
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+  </script>
+</body>
+</html>
