@@ -5,6 +5,7 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const chalk = require('chalk');
+const QRCode = require('qrcode');
 const {
   initClient,
   run,
@@ -14,6 +15,7 @@ const {
   isSending,
   cancelSend,
   clearProgress,
+  onDisconnect,
 } = require('./index');
 const config = require('../config');
 
@@ -37,6 +39,7 @@ const upload = multer({ storage });
 
 // Serve static files
 app.use(express.static(path.join(__dirname, 'public')));
+app.use('/reports', express.static(path.join(__dirname, '../reports')));
 
 // ─────────────────────────────────────────────
 // API routes
@@ -95,6 +98,35 @@ app.get('/api/sample-excel', (req, res) => {
   res.download(tmpPath);
 });
 
+// Get all reports
+app.get('/api/reports', (req, res) => {
+  const reportsDir = path.join(__dirname, '../reports');
+  if (!fs.existsSync(reportsDir)) return res.json([]);
+
+  const files = fs.readdirSync(reportsDir)
+    .filter(f => f.endsWith('.xlsx'))
+    .map(f => {
+      const filePath = path.join(reportsDir, f);
+      const stats = fs.statSync(filePath);
+      return {
+        filename: f,
+        date: stats.mtime,
+        size: (stats.size / 1024).toFixed(2) + ' KB',
+        path: '/reports/' + f
+      };
+    })
+    .sort((a, b) => new Date(b.date) - new Date(a.date));
+
+  res.json(files);
+});
+
+// ─────────────────────────────────────────────
+// Global disconnect → broadcast to all connected clients
+// ─────────────────────────────────────────────
+onDisconnect((reason) => {
+  io.emit('whatsapp_disconnected', { reason });
+});
+
 // ─────────────────────────────────────────────
 // Socket.IO
 // ─────────────────────────────────────────────
@@ -117,8 +149,13 @@ io.on('connection', (socket) => {
 
       await initClient(
         // QR callback
-        (qr) => {
-          socket.emit('qr', { qr });
+        async (qr) => {
+          try {
+            const qrImage = await QRCode.toDataURL(qr);
+            socket.emit('qr', { image: qrImage });
+          } catch {
+            socket.emit('qr', { qr });
+          }
           socket.emit('status', { type: 'qr', message: 'Scan QR code with WhatsApp.' });
         },
         // Ready callback
@@ -126,6 +163,7 @@ io.on('connection', (socket) => {
           if (disconnectReason) {
             socket.emit('status', { type: 'error', message: `Disconnected: ${disconnectReason}` });
             socket.emit('client-disconnected');
+            socket.emit('whatsapp_disconnected', { reason: disconnectReason });
             return;
           }
           socket.emit('status', { type: 'info', message: 'WhatsApp client ready!' });

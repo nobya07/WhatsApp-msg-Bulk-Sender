@@ -6,7 +6,18 @@ const cliProgress = require('cli-progress');
 const cron = require('node-cron');
 const path = require('path');
 const fs = require('fs');
+const mime = require('mime-types');
 const config = require('../config');
+
+// ─────────────────────────────────────────────
+// Global crash protection
+// ─────────────────────────────────────────────
+process.on('uncaughtException', (err) => {
+  console.error(chalk.yellow('[KeepAlive] Uncaught exception:'), err.message);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error(chalk.yellow('[KeepAlive] Unhandled rejection:'), reason);
+});
 
 // ─────────────────────────────────────────────
 // State
@@ -14,6 +25,7 @@ const config = require('../config');
 let client = null;
 let isSending = false;
 let sendCancelled = false;
+let disconnectListeners = [];
 
 // ─────────────────────────────────────────────
 // Ensure directories exist
@@ -122,7 +134,7 @@ function randomDelay() {
 // ─────────────────────────────────────────────
 // Send a single message
 // ─────────────────────────────────────────────
-async function sendMessage(contact, personalizedMsg) {
+async function sendMessage(contact, personalizedMsg, attachmentPathOverride) {
   const formattedNumber = contact.number.replace(/\+/g, '').replace(/\s/g, '').replace(/-/g, '') + '@c.us';
 
   try {
@@ -135,14 +147,27 @@ async function sendMessage(contact, personalizedMsg) {
       return { ...contact, status: 'Failed', timeSent: new Date().toISOString(), error: 'Not on WhatsApp' };
     }
 
-    const hasAttachment = config.attachmentPath && config.attachmentPath.trim() !== '';
+    const attachmentPath = attachmentPathOverride || config.attachmentPath;
+    const hasAttachment = attachmentPath && attachmentPath.trim() !== '';
     if (hasAttachment) {
-      const attachAbs = path.resolve(__dirname, '..', config.attachmentPath);
+      const attachAbs = path.resolve(__dirname, '..', attachmentPath);
       if (!fs.existsSync(attachAbs)) {
         await client.sendMessage(formattedNumber, personalizedMsg);
       } else {
-        const media = MessageMedia.fromFilePath(attachAbs);
-        await client.sendMessage(formattedNumber, personalizedMsg, { media });
+        const fileData = fs.readFileSync(attachAbs);
+        const base64Data = fileData.toString('base64');
+        const mimeType = mime.lookup(attachAbs) || 'application/octet-stream';
+        const fileName = path.basename(attachAbs);
+        const fileSizeBytes = fs.statSync(attachAbs).size;
+        const fileSizeMB = fileSizeBytes / (1024 * 1024);
+        const maxSize = mimeType === 'application/pdf' ? 16 : 5;
+        if (fileSizeMB > maxSize) {
+          console.warn(`Attachment too large (${fileSizeMB.toFixed(2)}MB), sending text only`);
+          await client.sendMessage(formattedNumber, personalizedMsg);
+        } else {
+          const media = new MessageMedia(mimeType, base64Data, fileName);
+          await client.sendMessage(formattedNumber, media, { caption: personalizedMsg });
+        }
       }
     } else {
       await client.sendMessage(formattedNumber, personalizedMsg);
@@ -288,7 +313,7 @@ async function run(configOverrides = {}, statusCallback = null) {
       progressBar.update(i + 1, { status: `Sending to ${contact.number} (${contact.name})` });
       console.log(chalk.blue(`\n📨 [${i + 1}/${list.length}] Sending to ${contact.number} (${contact.name})...`));
 
-      const result = await sendMessage(contact, personalized);
+      const result = await sendMessage(contact, personalized, mergedConfig.attachmentPath);
 
       if (result.status === 'Sent') {
         sentCount++;
@@ -355,7 +380,17 @@ async function run(configOverrides = {}, statusCallback = null) {
 }
 
 // ─────────────────────────────────────────────
-// Initialize WhatsApp client
+// Register a listener for WhatsApp disconnect events
+// ─────────────────────────────────────────────
+function onDisconnect(fn) {
+  disconnectListeners.push(fn);
+  return () => {
+    disconnectListeners = disconnectListeners.filter(l => l !== fn);
+  };
+}
+
+// ─────────────────────────────────────────────
+// Initialize WhatsApp client (reusable after logout)
 // ─────────────────────────────────────────────
 async function initClient(qrCallback = null, readyCallback = null) {
   return new Promise((resolve, reject) => {
@@ -365,13 +400,22 @@ async function initClient(qrCallback = null, readyCallback = null) {
       }),
       puppeteer: {
         headless: true,
-        args: ['--no-sandbox', '--disable-setuid-sandbox', '--disable-dev-shm-usage', '--disable-gpu'],
+        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || '/usr/bin/chromium',
+        args: [
+          '--no-sandbox',
+          '--disable-setuid-sandbox',
+          '--disable-dev-shm-usage',
+          '--disable-gpu',
+          '--disable-software-rasterizer',
+          '--disable-extensions',
+          '--no-first-run',
+          '--single-process',
+          '--no-zygote'
+        ],
       },
     });
 
     client.on('qr', (qr) => {
-      qrcode.generate(qr, { small: true });
-      console.log(chalk.yellow('\n📱 Scan the QR code above with your WhatsApp phone.\n'));
       if (qrCallback) qrCallback(qr);
     });
 
@@ -381,10 +425,15 @@ async function initClient(qrCallback = null, readyCallback = null) {
       resolve(client);
     });
 
-    client.on('disconnected', (reason) => {
+    client.on('disconnected', async (reason) => {
       console.log(chalk.red(`\n⚠️ WhatsApp disconnected: ${reason}`));
-      console.log(chalk.yellow('Re-initialize client to send again.'));
+      if (isSending) {
+        sendCancelled = true;
+        isSending = false;
+      }
+      try { await client.destroy(); } catch (e) { /* ignore */ }
       client = null;
+      disconnectListeners.forEach(fn => fn(reason));
       if (readyCallback) readyCallback(null, reason);
     });
 
@@ -465,6 +514,7 @@ module.exports = {
   isSending: () => isSending,
   cancelSend: () => { sendCancelled = true; },
   clearProgress,
+  onDisconnect,
 };
 
 // Run if called directly

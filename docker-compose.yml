@@ -1,0 +1,18 @@
+version: '3.8'
+
+services:
+  whatsapp-bot:
+    build: .
+    container_name: whatsapp-automation
+    restart: always
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./reports:/app/reports
+      - ./attachments:/app/attachments
+      - ./.wwebjs_auth:/app/.wwebjs_auth
+      - ./progress.json:/app/progress.json
+    environment:
+      - NODE_ENV=production
+      - PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+      - PUPPETEER_EXECUTABLE_PATH=/usr/bin/chromium

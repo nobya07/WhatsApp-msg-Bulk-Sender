@@ -53,6 +53,58 @@ Edit `config.js` to set:
 
 Place images or PDFs in the `attachments/` folder and set the path in `config.js`.
 
+## 🐳 Docker Setup
+
+### First Time Setup
+1. Install Docker and Docker Compose on your machine
+2. Run: `docker-compose up -d`
+3. Open browser: http://localhost:3000
+4. Scan QR code with WhatsApp
+
+### Commands
+```bash
+# Start the app
+docker-compose up -d
+
+# Stop the app
+docker-compose down
+
+# View logs
+docker-compose logs -f
+
+# Restart the app
+docker-compose restart
+
+# Rebuild after changes
+docker-compose up -d --build
+```
+
+### For Oracle Cloud / VPS Deployment
+```bash
+# SSH into your server
+ssh user@your-server-ip
+
+# Install Docker
+sudo apt update
+sudo apt install docker.io docker-compose -y
+
+# Clone your repository
+git clone https://github.com/yourusername/whatsapp-automation.git
+cd whatsapp-automation
+
+# Start the app
+docker-compose up -d
+
+# Open port 3000 in your firewall
+sudo ufw allow 3000
+
+# Access at http://your-server-ip:3000
+```
+
+> **Note:** The WhatsApp session is saved in `.wwebjs_auth` volume. You only need to scan the QR code once — it persists across container restarts.
+
+---
+
 ## Usage
 
 ### CLI Mode
@@ -117,6 +169,11 @@ whatsapp-automation/
 ├── progress.json      → Auto-created progress file (crash recovery)
 ├── reports/           → Auto-created report Excel files
 ├── uploads/           → Uploaded files from web UI
+├── Dockerfile         → Docker image configuration
+├── docker-compose.yml → Docker Compose configuration
+├── start.sh           → Start script
+├── stop.sh            → Stop script
+├── .dockerignore      → Docker ignore rules
 ├── package.json
 └── README.md
 ```
